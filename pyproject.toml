@@ -1,0 +1,17 @@
+[project]
+name = "simplefin-grafana"
+version = "0.1.0"
+description = "A SimpleFIN bridge for Grafana dashboards"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "requests",
+]
+
+[project.scripts]
+simplefin-setup = "simplefin_grafana.cli:setup"
+simplefin-collect = "simplefin_grafana.cli:collect"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

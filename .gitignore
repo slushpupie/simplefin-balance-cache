@@ -1,0 +1,4 @@
+config.json
+balances.json
+*.log
+__pycache__/
