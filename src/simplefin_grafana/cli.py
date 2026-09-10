@@ -21,9 +21,10 @@ def setup():
         access_url = response.text.strip()
         
         # 3. Save to config.json
-        # We initialize with an empty influx section so the user knows what to fill
+        # We initialize with an empty influx section and nicknames mapping
         config = {
             'access_url': access_url,
+            'nicknames': {},
             'influxdb': {
                 'url': '',
                 'token': '',
@@ -90,17 +91,20 @@ def collect():
         write_api = client.write_api(write_options=SYNCHRONOUS)
         
         points = []
+        nicknames = config.get('nicknames', {})
         for acc in data.get('accounts', []):
             # Create a point for each account
             # Measurement: account_balances
-            # Tags: account_name, currency
+            # Tags: account_name (use nickname if available), currency
             # Field: balance
             # Timestamp: Use the balance-date provided by SimpleFIN
             
+            raw_name = acc.get('name')
+            display_name = nicknames.get(raw_name, raw_name)
             balance_ts = acc.get('balance-date', 0)
             
             point = Point("account_balances") \
-                .tag("account_name", acc.get('name')) \
+                .tag("account_name", display_name) \
                 .tag("currency", acc.get('currency')) \
                 .field("balance", float(acc.get('balance', 0))) \
                 .time(balance_ts, WritePrecision.S)
