@@ -7,38 +7,72 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 
 def setup():
-    """Exchange a Setup Token for an Access URL."""
+    """Exchange a Setup Token for an Access URL and initialize config safely."""
     setup_token = input('Enter your SimpleFIN Setup Token: ').strip()
     
     try:
-        # 1. Decode the setup token to get the claim URL
+        # 1. Decode and exchange token for Access URL
         claim_url = base64.b64decode(setup_token).decode('utf-8')
         print(f"Claiming Access URL from: {claim_url}")
         
-        # 2. Exchange setup token for access URL
         response = requests.post(claim_url, headers={'Content-Length': '0'})
         response.raise_for_status()
         access_url = response.text.strip()
         
-        # 3. Save to config.json
-        # We initialize with an empty influx section and nicknames mapping
-        config = {
-            'access_url': access_url,
-            'nicknames': {},
-            'influxdb': {
+        # 2. Load existing config or start fresh
+        config = {}
+        if os.path.exists('config.json'):
+            with open('config.json', 'r') as f:
+                try:
+                    config = json.load(f)
+                    print("Existing configuration found. Updating Access URL and verifying structure...")
+                except json.JSONDecodeError:
+                    print("Existing config corrupted. Starting fresh.")
+
+        # 3. Update Access URL
+        config['access_url'] = access_url
+        
+        # 4. Ensure default structural sections exist
+        if 'nicknames' not in config:
+            config['nicknames'] = {}
+        if 'account_metadata' not in config:
+            config['account_metadata'] = {}
+        if 'influxdb' not in config:
+            config['influxdb'] = {
                 'url': '',
                 'token': '',
                 'org': '',
                 'bucket': ''
             }
-        }
+
+        # 5. Pre-populate metadata from balances.json to save copy-pasting
+        balances_path = 'balances.json'
+        if os.path.exists(balances_path):
+            try:
+                with open(balances_path, 'r') as f:
+                    balances_data = json.load(f)
+                    accounts = balances_data.get('accounts', [])
+                    
+                    added_count = 0
+                    for acc in accounts:
+                        name = acc.get('name')
+                        if name and name not in config['account_metadata']:
+                            config['account_metadata'][name] = {}
+                            added_count += 1
+                    
+                    if added_count > 0:
+                        print(f"Pre-populated {added_count} accounts from balances.json into account_metadata.")
+            except Exception as e:
+                print(f"Warning: Could not pre-populate metadata from balances.json: {e}")
+        
         with open('config.json', 'w') as f:
             json.dump(config, f, indent=4)
         
         os.chmod('config.json', 0o600)
         
-        print("\nSuccess! Access URL saved to config.json")
-        print("Please edit config.json to add your InfluxDB credentials before running 'simplefin-collect'.")
+        print("\nSuccess! Access URL updated in config.json")
+        if not config['influxdb'].get('url'):
+            print("Note: InfluxDB section is empty. Please edit config.json to add your credentials.")
         
     except Exception as e:
         print(f"Error: {e}")
@@ -92,10 +126,11 @@ def collect():
         
         points = []
         nicknames = config.get('nicknames', {})
+        metadata = config.get('account_metadata', {})
         for acc in data.get('accounts', []):
             # Create a point for each account
             # Measurement: account_balances
-            # Tags: account_name (use nickname if available), currency
+            # Tags: account_name (use nickname if available), currency, + custom metadata
             # Field: balance
             # Timestamp: Use the balance-date provided by SimpleFIN
             
@@ -105,9 +140,15 @@ def collect():
             
             point = Point("account_balances") \
                 .tag("account_name", display_name) \
-                .tag("currency", acc.get('currency')) \
-                .field("balance", float(acc.get('balance', 0))) \
-                .time(balance_ts, WritePrecision.S)
+                .tag("currency", acc.get('currency'))
+            
+            # Add custom tags from metadata
+            acc_meta = metadata.get(raw_name, {})
+            for tag_key, tag_val in acc_meta.items():
+                point.tag(tag_key, tag_val)
+                
+            point = point.field("balance", float(acc.get('balance', 0))) \
+                        .time(balance_ts, WritePrecision.S)
             
             points.append(point)
         
