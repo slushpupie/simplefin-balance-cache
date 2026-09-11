@@ -8,31 +8,44 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 
 def setup():
     """Exchange a Setup Token for an Access URL and initialize config safely."""
+    print("--- SimpleFIN Setup ---")
+    print("Press Enter to skip token update and only refresh configuration structure.")
     setup_token = input('Enter your SimpleFIN Setup Token: ').strip()
     
     try:
-        # 1. Decode and exchange token for Access URL
-        claim_url = base64.b64decode(setup_token).decode('utf-8')
-        print(f"Claiming Access URL from: {claim_url}")
-        
-        response = requests.post(claim_url, headers={'Content-Length': '0'})
-        response.raise_for_status()
-        access_url = response.text.strip()
-        
-        # 2. Load existing config or start fresh
-        config = {}
-        if os.path.exists('config.json'):
-            with open('config.json', 'r') as f:
-                try:
-                    config = json.load(f)
-                    print("Existing configuration found. Updating Access URL and verifying structure...")
-                except json.JSONDecodeError:
-                    print("Existing config corrupted. Starting fresh.")
+        # 1. Decode and exchange token for Access URL (Optional)
+        if setup_token:
+            claim_url = base64.b64decode(setup_token).decode('utf-8')
+            print(f"Claiming Access URL from: {claim_url}")
+            
+            response = requests.post(claim_url, headers={'Content-Length': '0'})
+            response.raise_for_status()
+            access_url = response.text.strip()
+            
+            # Load existing config or start fresh to update token
+            config = {}
+            if os.path.exists('config.json'):
+                with open('config.json', 'r') as f:
+                    try:
+                        config = json.load(f)
+                        print("Existing configuration found. Updating Access URL...")
+                    except json.JSONDecodeError:
+                        print("Existing config corrupted. Starting fresh.")
+            
+            config['access_url'] = access_url
+            print("Success! Access URL updated.")
+        else:
+            print("Skipping token update.")
+            # Load existing config to perform structure updates
+            config = {}
+            if os.path.exists('config.json'):
+                with open('config.json', 'r') as f:
+                    try:
+                        config = json.load(f)
+                    except json.JSONDecodeError:
+                        print("Existing config corrupted.")
 
-        # 3. Update Access URL
-        config['access_url'] = access_url
-        
-        # 4. Ensure default structural sections exist
+        # 2. Ensure default structural sections exist
         if 'nicknames' not in config:
             config['nicknames'] = {}
         if 'account_metadata' not in config:
@@ -45,7 +58,7 @@ def setup():
                 'bucket': ''
             }
 
-        # 5. Pre-populate metadata from balances.json to save copy-pasting
+        # 3. Pre-populate metadata from balances.json to save copy-pasting
         balances_path = 'balances.json'
         if os.path.exists(balances_path):
             try:
@@ -65,13 +78,15 @@ def setup():
             except Exception as e:
                 print(f"Warning: Could not pre-populate metadata from balances.json: {e}")
         
-        with open('config.json', 'w') as f:
-            json.dump(config, f, indent=4)
+        # Only save if config was actually modified or if we had a token update
+        # (Since we might have just printed "Skipping token update" and no file exists yet)
+        if config or setup_token:
+            with open('config.json', 'w') as f:
+                json.dump(config, f, indent=4)
+            os.chmod('config.json', 0o600)
+            print("Configuration saved to config.json")
         
-        os.chmod('config.json', 0o600)
-        
-        print("\nSuccess! Access URL updated in config.json")
-        if not config['influxdb'].get('url'):
+        if not config.get('influxdb', {}).get('url'):
             print("Note: InfluxDB section is empty. Please edit config.json to add your credentials.")
         
     except Exception as e:
